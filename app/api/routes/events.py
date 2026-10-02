@@ -1,3 +1,5 @@
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, Request, status
 
 from app.core.metrics import BATCH_SIZE, EVENTS_ACCEPTED, EVENTS_DUPLICATE
@@ -12,12 +14,16 @@ async def ingestion_service() -> EventIngestionService:
     return await EventIngestionService.create()
 
 
+RateLimitDependency = Annotated[None, Depends(enforce_rate_limit)]
+IngestionDependency = Annotated[EventIngestionService, Depends(ingestion_service)]
+
+
 @router.post("", response_model=IngestResponse, status_code=status.HTTP_202_ACCEPTED)
 async def ingest_event(
     payload: EventIn,
     request: Request,
-    _: None = Depends(enforce_rate_limit),
-    service: EventIngestionService = Depends(ingestion_service),
+    _: RateLimitDependency,
+    service: IngestionDependency,
 ) -> IngestResponse:
     accepted = await service.enqueue(payload)
     label = payload.event_type
