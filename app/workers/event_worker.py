@@ -120,7 +120,10 @@ async def run_worker() -> None:
             now = time.monotonic()
             if now - last_claim >= 30:
                 stale = await claim_stale_messages(redis, name)
-                tasks.extend(handle_message(redis, message_id, fields) for message_id, fields in stale)
+                tasks.extend(
+                    handle_message(redis, message_id, fields)
+                    for message_id, fields in stale
+                )
                 last_claim = now
 
             messages = await redis.xreadgroup(
