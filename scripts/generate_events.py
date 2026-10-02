@@ -46,7 +46,10 @@ async def main() -> None:
             accepted += response.json()["accepted"]
 
     elapsed = time.perf_counter() - started
-    print(f"sent={args.count} accepted={accepted} elapsed={elapsed:.2f}s rate={args.count/elapsed:.0f} events/s")
+    print(
+        f"sent={args.count} accepted={accepted} "
+        f"elapsed={elapsed:.2f}s rate={args.count / elapsed:.0f} events/s"
+    )
 
 
 if __name__ == "__main__":
