@@ -1,13 +1,26 @@
-from typing import Annotated
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Request, status
+from fastapi import APIRouter, Depends, Query, Request, status
+from pydantic import BaseModel
+from sqlalchemy import select
 
+from app.core.database import async_session_maker
 from app.core.metrics import BATCH_SIZE, EVENTS_ACCEPTED, EVENTS_DUPLICATE
+from app.models.event import Event
 from app.schemas.event import BatchIngestRequest, BatchIngestResponse, EventIn, IngestResponse
 from app.services.ingestion import EventIngestionService
 from app.services.rate_limit import enforce_rate_limit
 
 router = APIRouter(prefix="/events", tags=["events"])
+
+
+class RecentEventOut(BaseModel):
+    event_id: str
+    user_id: str
+    event_type: str
+    occurred_at: str
+    received_at: str
+    properties: dict[str, Any]
 
 
 async def ingestion_service() -> EventIngestionService:
@@ -42,8 +55,8 @@ async def ingest_event(
 @router.post("/batch", response_model=BatchIngestResponse, status_code=status.HTTP_202_ACCEPTED)
 async def ingest_batch(
     payload: BatchIngestRequest,
-    _: None = Depends(enforce_rate_limit),
-    service: EventIngestionService = Depends(ingestion_service),
+    _: RateLimitDependency,
+    service: IngestionDependency,
 ) -> BatchIngestResponse:
     BATCH_SIZE.observe(len(payload.events))
     results = await service.enqueue_batch(payload.events)
@@ -59,28 +72,25 @@ async def ingest_batch(
     )
 
 
-@router.get("/recent", response_model=list[dict])
-async def recent_events(limit: int = 12):
-    from sqlalchemy import select
-    from app.core.database import async_session_maker
-    from app.models.event import Event
-
-    safe_limit = max(1, min(limit, 100))
+@router.get("/recent", response_model=list[RecentEventOut])
+async def recent_events(
+    limit: Annotated[int, Query(ge=1, le=100)] = 12,
+) -> list[RecentEventOut]:
     async with async_session_maker() as session:
         rows = (
             await session.execute(
-                select(Event).order_by(Event.occurred_at.desc()).limit(safe_limit)
+                select(Event).order_by(Event.occurred_at.desc()).limit(limit)
             )
         ).scalars().all()
 
     return [
-        {
-            "event_id": row.event_id,
-            "user_id": row.user_id,
-            "event_type": row.event_type,
-            "occurred_at": row.occurred_at.isoformat(),
-            "received_at": row.received_at.isoformat() if row.received_at else "",
-            "properties": row.properties,
-        }
+        RecentEventOut(
+            event_id=row.event_id,
+            user_id=row.user_id,
+            event_type=row.event_type,
+            occurred_at=row.occurred_at.isoformat(),
+            received_at=row.received_at.isoformat() if row.received_at else "",
+            properties=row.properties,
+        )
         for row in rows
     ]
