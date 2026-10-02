@@ -1,0 +1,63 @@
+name: dashboard-screenshot
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "docs/dashboard-preview.png"
+
+permissions:
+  contents: write
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Seed live demo data
+        shell: bash
+        run: |
+          API="https://seoyoung-event-platform-api.onrender.com"
+          for i in $(seq 1 18); do
+            TYPE="product_view"
+            AMOUNT=""
+            if (( i % 5 == 0 )); then TYPE="purchase"; AMOUNT=',"amount":89000,"currency":"KRW"'; fi
+            if (( i % 4 == 0 )); then TYPE="add_to_cart"; fi
+            curl -fsS -X POST "$API/v1/events"               -H "Content-Type: application/json"               -d "{\"event_id\":\"shot_\${GITHUB_RUN_ID}_\${i}\",\"user_id\":\"user_$((100 + i % 6))\",\"event_type\":\"\${TYPE}\",\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"properties\":{\"product_id\":\"SKU-$((3800+i))\",\"source\":\"live-demo\"\${AMOUNT}}}" || true
+          done
+          sleep 5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Playwright Chromium
+        run: |
+          npm install --no-save playwright@1.55.0
+          npx playwright install --with-deps chromium
+
+      - name: Capture deployed dashboard
+        run: |
+          mkdir -p docs
+          node - <<'NODE'
+          const { chromium } = require('playwright');
+          (async () => {
+            const browser = await chromium.launch({ headless: true });
+            const page = await browser.newPage({ viewport: { width: 1440, height: 1200 }, deviceScaleFactor: 1 });
+            await page.goto('https://seoyoung-event-platform.onrender.com', { waitUntil: 'networkidle', timeout: 120000 });
+            await page.waitForTimeout(4000);
+            await page.screenshot({ path: 'docs/dashboard-preview.png', fullPage: true });
+            await browser.close();
+          })();
+          NODE
+
+      - name: Commit screenshot
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/dashboard-preview.png
+          git diff --cached --quiet && exit 0
+          git commit -m "docs: refresh live dashboard screenshot"
+          git push

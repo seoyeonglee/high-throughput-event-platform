@@ -7,8 +7,20 @@
 React · TypeScript · FastAPI · PostgreSQL · Redis Streams · Docker · Prometheus
 
 [![CI](https://github.com/seoyeonglee/high-throughput-event-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/seoyeonglee/high-throughput-event-platform/actions/workflows/ci.yml)
+[![Live Demo](https://img.shields.io/badge/Live_Demo-Render-46E3B7)](https://seoyoung-event-platform.onrender.com)
+[![API Docs](https://img.shields.io/badge/API-Swagger-85EA2D)](https://seoyoung-event-platform-api.onrender.com/docs)
+
+**[Open Live Demo](https://seoyoung-event-platform.onrender.com)** · **[Open API Docs](https://seoyoung-event-platform-api.onrender.com/docs)**
 
 </div>
+
+---
+
+## Live dashboard
+
+[![High-Throughput Event Platform dashboard](docs/dashboard-preview.png)](https://seoyoung-event-platform.onrender.com)
+
+> The public demo is intentionally deployed on a zero-cost, ephemeral backend so recruiters can interact with the UI without paid infrastructure. The repository's full reference architecture remains **Redis Streams + PostgreSQL + asynchronous workers**, runnable through Docker Compose. Free-tier services may cold-start after inactivity.
 
 ---
 
