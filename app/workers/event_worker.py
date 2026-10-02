@@ -21,6 +21,36 @@ logging.basicConfig(
 )
 logger = logging.getLogger("event-worker")
 
+# Guard on the PEL so a retry after a lost response, or a competing reclaimed
+# delivery, cannot create a second copy. XADD precedes XACK so a destination
+# write error leaves the original pending. The script removes the client-crash
+# window between the two operations.
+MOVE_PENDING_LUA = """
+if #redis.call('XPENDING', KEYS[1], ARGV[1], ARGV[2], ARGV[2], 1) == 0 then
+  return 0
+end
+redis.call('XADD', KEYS[2], '*', unpack(ARGV, 3))
+redis.call('XACK', KEYS[1], ARGV[1], ARGV[2])
+return 1
+"""
+
+
+async def move_pending_message(
+    redis: Redis, message_id: str, destination: str, fields: dict[str, str | int]
+) -> bool:
+    arguments = [value for item in fields.items() for value in item]
+    return bool(
+        await redis.eval(
+            MOVE_PENDING_LUA,
+            2,
+            settings.redis_stream,
+            destination,
+            settings.redis_consumer_group,
+            message_id,
+            *arguments,
+        )
+    )
+
 
 def consumer_name() -> str:
     return f"{socket.gethostname()}-{os.getpid()}"
@@ -32,10 +62,19 @@ async def requeue_or_dlq(
     fields: dict[str, str],
     error: Exception,
 ) -> None:
-    retry_count = int(fields.get("retry_count", "0")) + 1
+    try:
+        previous_retries = int(fields.get("retry_count", "0"))
+        if previous_retries < 0:
+            raise ValueError("retry_count must be non-negative")
+        retry_count = previous_retries + 1
+    except (TypeError, ValueError):
+        # Invalid metadata cannot become valid by retrying the same envelope.
+        retry_count = settings.worker_max_retries + 1
     payload = fields.get("payload", "")
     if retry_count <= settings.worker_max_retries:
-        await redis.xadd(
+        moved = await move_pending_message(
+            redis,
+            message_id,
             settings.redis_stream,
             {
                 "payload": payload,
@@ -43,9 +82,12 @@ async def requeue_or_dlq(
                 "previous_message_id": message_id,
             },
         )
-        EVENTS_FAILED.labels(stage="retry").inc()
+        if moved:
+            EVENTS_FAILED.labels(stage="retry").inc()
     else:
-        await redis.xadd(
+        moved = await move_pending_message(
+            redis,
+            message_id,
             settings.redis_dlq_stream,
             {
                 "payload": payload,
@@ -54,9 +96,8 @@ async def requeue_or_dlq(
                 "error": repr(error)[:1000],
             },
         )
-        EVENTS_FAILED.labels(stage="dlq").inc()
-
-    await redis.xack(settings.redis_stream, settings.redis_consumer_group, message_id)
+        if moved:
+            EVENTS_FAILED.labels(stage="dlq").inc()
 
 
 async def handle_message(redis: Redis, message_id: str, fields: dict[str, str]) -> None:
@@ -69,7 +110,9 @@ async def handle_message(redis: Redis, message_id: str, fields: dict[str, str]) 
         EVENTS_PROCESSED.labels(event_type=event.event_type).inc()
     except (ValidationError, KeyError) as exc:
         # Malformed payloads are not transient: send directly to DLQ.
-        await redis.xadd(
+        moved = await move_pending_message(
+            redis,
+            message_id,
             settings.redis_dlq_stream,
             {
                 "payload": fields.get("payload", ""),
@@ -78,8 +121,8 @@ async def handle_message(redis: Redis, message_id: str, fields: dict[str, str]) 
                 "error": repr(exc)[:1000],
             },
         )
-        await redis.xack(settings.redis_stream, settings.redis_consumer_group, message_id)
-        EVENTS_FAILED.labels(stage="validation").inc()
+        if moved:
+            EVENTS_FAILED.labels(stage="validation").inc()
     except Exception as exc:  # noqa: BLE001 - worker must isolate per-message failures
         logger.exception("event processing failed", extra={"message_id": message_id})
         await requeue_or_dlq(redis, message_id, fields, exc)
@@ -87,23 +130,25 @@ async def handle_message(redis: Redis, message_id: str, fields: dict[str, str]) 
         PROCESSING_SECONDS.observe(time.perf_counter() - started)
 
 
-async def claim_stale_messages(redis: Redis, name: str) -> list[tuple[str, dict[str, str]]]:
-    """Recover messages left pending by workers that died before ACKing them."""
+async def claim_stale_messages(
+    redis: Redis, name: str, start_id: str = "0-0"
+) -> tuple[str, list[tuple[str, dict[str, str]]]]:
+    """Recover one bounded PEL page and preserve the cursor across empty pages."""
     try:
         result = await redis.xautoclaim(
             name=settings.redis_stream,
             groupname=settings.redis_consumer_group,
             consumername=name,
             min_idle_time=settings.worker_claim_idle_ms,
-            start_id="0-0",
+            start_id=start_id,
             count=settings.worker_batch_size,
         )
     except Exception:  # noqa: BLE001 - compatibility/connection issues are logged by main loop
         logger.exception("failed to autoclaim stale messages")
-        return []
+        return start_id, []
 
     # redis-py returns (next_start_id, messages[, deleted_ids]) depending on Redis version.
-    return result[1] if len(result) >= 2 else []
+    return (result[0], result[1]) if len(result) >= 2 else (start_id, [])
 
 
 async def run_worker() -> None:
@@ -115,14 +160,14 @@ async def run_worker() -> None:
 
     try:
         last_claim = 0.0
+        claim_cursor = "0-0"
         while True:
             tasks = []
             now = time.monotonic()
-            if now - last_claim >= 30:
-                stale = await claim_stale_messages(redis, name)
+            if now - last_claim >= settings.worker_claim_interval_ms / 1000:
+                claim_cursor, stale = await claim_stale_messages(redis, name, claim_cursor)
                 tasks.extend(
-                    handle_message(redis, message_id, fields)
-                    for message_id, fields in stale
+                    handle_message(redis, message_id, fields) for message_id, fields in stale
                 )
                 last_claim = now
 

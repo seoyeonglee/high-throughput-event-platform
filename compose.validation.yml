@@ -1,0 +1,66 @@
+# Isolated, disposable real-stack validation. No .env, host ports, or shared volumes.
+x-app: &app
+  build: .
+  environment: &environment
+    DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/events
+    REDIS_URL: redis://redis:6379/0
+    RATE_LIMIT_REQUESTS: "1000000"
+    WORKER_BATCH_SIZE: "100"
+    WORKER_BLOCK_MS: "200"
+    WORKER_CLAIM_IDLE_MS: "60000"
+    WORKER_CLAIM_INTERVAL_MS: "1000"
+    LOG_LEVEL: WARNING
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: events
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U postgres -d events"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  redis:
+    image: redis:7-alpine
+    command: [redis-server, --appendonly, "yes"]
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  api:
+    <<: *app
+    command: [uvicorn, app.main:app, --host, "0.0.0.0", --port, "8000", --no-access-log]
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready')"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+  worker:
+    <<: *app
+    command: [python, -m, app.workers.event_worker]
+    depends_on:
+      api: {condition: service_healthy}
+  test:
+    <<: *app
+    profiles: [tools]
+    environment:
+      <<: *environment
+      RUN_INTEGRATION: "1"
+    command: [pytest, -v, -m, integration, --junitxml=/evidence/integration.xml]
+    volumes: ["./artifacts:/evidence"]
+    depends_on:
+      api: {condition: service_healthy}
+  benchmark:
+    <<: *app
+    profiles: [tools]
+    entrypoint: [python, scripts/benchmark.py, --url, "http://api:8000"]
+    volumes: ["./artifacts:/evidence"]
+    depends_on:
+      api: {condition: service_healthy}
