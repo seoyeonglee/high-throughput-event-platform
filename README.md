@@ -2,45 +2,107 @@
 
 # High-Throughput Event Platform
 
-**Production-oriented event ingestion and asynchronous processing platform**
+**Full-stack event platform: React/TypeScript operations console + FastAPI async backend**
 
-FastAPI · PostgreSQL · Redis Streams · Docker · Prometheus · AWS-ready architecture
+React · TypeScript · FastAPI · PostgreSQL · Redis Streams · Docker · Prometheus
 
 [![CI](https://github.com/seoyeonglee/high-throughput-event-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/seoyeonglee/high-throughput-event-platform/actions/workflows/ci.yml)
-![Python](https://img.shields.io/badge/Python-3.12-blue)
-![FastAPI](https://img.shields.io/badge/FastAPI-async_API-009688)
-![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1)
-![Redis](https://img.shields.io/badge/Redis-Streams-DC382D)
-![Docker](https://img.shields.io/badge/Docker-Compose-2496ED)
 
 </div>
 
 ---
 
-## Overview
+## Why this project exists
 
-A backend portfolio project built to answer a practical systems question:
+This project is designed as an **end-to-end full-stack system**, not just an API demo.
 
-> **How do you accept bursty, high-volume events quickly while keeping downstream processing reliable, idempotent, recoverable, and independently scalable?**
+The browser UI sends real events to a FastAPI ingestion service, the backend validates and enqueues them in Redis Streams, asynchronous workers process them, PostgreSQL stores durable event/user state, and the UI reads analytics and processed events back through REST APIs.
 
-Instead of synchronously writing every request to PostgreSQL, the platform separates **event ingestion** from **event processing** with Redis Streams. FastAPI accepts validated events, workers process them asynchronously, PostgreSQL remains the durable source of truth, and failed work is isolated through retry and dead-letter handling.
+That means the project demonstrates the complete application path:
 
-This repository focuses on backend concerns that matter beyond CRUD: **traffic spikes, idempotency, at-least-once delivery, duplicate protection, worker crash recovery, backpressure, observability, and production architecture trade-offs.**
+```text
+React / TypeScript UI
+        ↓
+FastAPI REST API
+        ↓
+Redis Streams
+        ↓
+Async worker
+        ↓
+PostgreSQL
+        ↓
+Analytics / recent-event APIs
+        ↓
+React dashboard
+```
 
-## Portfolio snapshot
+## Full-stack capabilities demonstrated
 
-| Area | Implementation |
+### Frontend
+- React + TypeScript + Vite
+- responsive operations dashboard
+- form handling and client-side validation
+- asynchronous REST API integration
+- dashboard metrics and event distribution visualization
+- user aggregate lookup
+- recent processed-event table
+- error/loading/empty states
+
+### Backend
+- FastAPI asynchronous REST endpoints
+- Pydantic validation
+- PostgreSQL + async SQLAlchemy
+- Redis Streams consumer groups
+- idempotent ingestion
+- retries / DLQ / worker crash recovery
+- batch ingestion
+- rate limiting
+- Prometheus metrics
+- health/readiness probes
+
+### Engineering / delivery
+- Docker Compose runs frontend, API, worker, PostgreSQL and Redis together
+- GitHub Actions validates Python lint/tests and frontend production build
+- synthetic traffic generator and benchmark tooling
+- explicit reliability trade-offs and production mapping
+
+## Recruiter-friendly demo flow
+
+1. Start the full stack with Docker Compose.
+2. Open the React console at `http://localhost:5173`.
+3. Create a `product_view`, `add_to_cart`, or `purchase` event.
+4. FastAPI returns HTTP 202 after queue acceptance.
+5. A Redis Streams worker processes the event asynchronously.
+6. PostgreSQL stores the event and updates the user aggregate.
+7. Refresh the dashboard to see analytics, user state, and recent events.
+
+## Tech stack
+
+| Layer | Technology |
 |---|---|
-| **Ingestion** | FastAPI single + batch APIs, up to 1,000 events/request |
-| **Async processing** | Redis Streams consumer groups + independently scalable workers |
-| **Idempotency** | Atomic Redis Lua enqueue + PostgreSQL primary-key deduplication |
-| **Failure handling** | Retry pipeline, DLQ, malformed-message isolation |
-| **Crash recovery** | Redis `XAUTOCLAIM` reclaims stale pending messages |
-| **Persistence** | Async SQLAlchemy + PostgreSQL JSONB + transactional user aggregates |
-| **Traffic protection** | Redis-backed fixed-window rate limiting |
-| **Observability** | Prometheus metrics + liveness/readiness probes |
-| **Validation** | Unit tests, CI, synthetic traffic generator, p50/p95/p99 benchmark tooling |
-| **Production mapping** | ECS/Fargate, RDS, ElastiCache, SQS/MSK, ECR, CloudWatch |
+| Frontend | React 18, TypeScript, Vite, CSS |
+| API | Python 3.12, FastAPI, Pydantic |
+| Database | PostgreSQL 16, SQLAlchemy 2, asyncpg |
+| Queue / cache | Redis 7, Redis Streams |
+| Processing | Async Python workers, consumer groups |
+| Observability | Prometheus, health/readiness probes |
+| Runtime | Docker, Docker Compose |
+| Quality | pytest, Ruff, TypeScript build, GitHub Actions |
+
+## Quick start — full stack
+
+```bash
+cp .env.example .env
+docker compose up --build
+```
+
+Open:
+
+- Frontend: `http://localhost:5173`
+- API docs: `http://localhost:8000/docs`
+- Metrics: `http://localhost:8000/metrics`
+
+---
 
 ## Architecture
 
