@@ -57,3 +57,30 @@ async def ingest_batch(
         accepted=accepted,
         duplicates=duplicates,
     )
+
+
+@router.get("/recent", response_model=list[dict])
+async def recent_events(limit: int = 12):
+    from sqlalchemy import select
+    from app.core.database import async_session_maker
+    from app.models.event import Event
+
+    safe_limit = max(1, min(limit, 100))
+    async with async_session_maker() as session:
+        rows = (
+            await session.execute(
+                select(Event).order_by(Event.occurred_at.desc()).limit(safe_limit)
+            )
+        ).scalars().all()
+
+    return [
+        {
+            "event_id": row.event_id,
+            "user_id": row.user_id,
+            "event_type": row.event_type,
+            "occurred_at": row.occurred_at.isoformat(),
+            "received_at": row.received_at.isoformat() if row.received_at else "",
+            "properties": row.properties,
+        }
+        for row in rows
+    ]
