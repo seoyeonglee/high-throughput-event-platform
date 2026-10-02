@@ -1,47 +1,134 @@
-# high-throughput-event-platform
+<div align="center">
 
-A production-oriented backend portfolio project for **high-volume event ingestion and asynchronous processing** using FastAPI, PostgreSQL, Redis Streams, and Docker.
+# High-Throughput Event Platform
 
-The project demonstrates the backend concerns that matter beyond CRUD: burst handling, idempotency, at-least-once processing, database-side deduplication, retries, a dead-letter queue, rate limiting, health checks, metrics, load testing, and an AWS-ready production design.
+**Production-oriented event ingestion and asynchronous processing platform**
 
-## Why this project exists
+FastAPI · PostgreSQL · Redis Streams · Docker · Prometheus · AWS-ready architecture
 
-Many event-driven products receive traffic faster than downstream storage or analytics systems can safely process it. Writing every event synchronously to a database couples client latency to database health and makes traffic spikes harder to absorb.
+[![CI](https://github.com/seoyeonglee/high-throughput-event-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/seoyeonglee/high-throughput-event-platform/actions/workflows/ci.yml)
+![Python](https://img.shields.io/badge/Python-3.12-blue)
+![FastAPI](https://img.shields.io/badge/FastAPI-async_API-009688)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1)
+![Redis](https://img.shields.io/badge/Redis-Streams-DC382D)
+![Docker](https://img.shields.io/badge/Docker-Compose-2496ED)
 
-This project separates **ingestion** from **processing**:
+</div>
+
+---
+
+## Overview
+
+A backend portfolio project built to answer a practical systems question:
+
+> **How do you accept bursty, high-volume events quickly while keeping downstream processing reliable, idempotent, recoverable, and independently scalable?**
+
+Instead of synchronously writing every request to PostgreSQL, the platform separates **event ingestion** from **event processing** with Redis Streams. FastAPI accepts validated events, workers process them asynchronously, PostgreSQL remains the durable source of truth, and failed work is isolated through retry and dead-letter handling.
+
+This repository focuses on backend concerns that matter beyond CRUD: **traffic spikes, idempotency, at-least-once delivery, duplicate protection, worker crash recovery, backpressure, observability, and production architecture trade-offs.**
+
+## Portfolio snapshot
+
+| Area | Implementation |
+|---|---|
+| **Ingestion** | FastAPI single + batch APIs, up to 1,000 events/request |
+| **Async processing** | Redis Streams consumer groups + independently scalable workers |
+| **Idempotency** | Atomic Redis Lua enqueue + PostgreSQL primary-key deduplication |
+| **Failure handling** | Retry pipeline, DLQ, malformed-message isolation |
+| **Crash recovery** | Redis `XAUTOCLAIM` reclaims stale pending messages |
+| **Persistence** | Async SQLAlchemy + PostgreSQL JSONB + transactional user aggregates |
+| **Traffic protection** | Redis-backed fixed-window rate limiting |
+| **Observability** | Prometheus metrics + liveness/readiness probes |
+| **Validation** | Unit tests, CI, synthetic traffic generator, p50/p95/p99 benchmark tooling |
+| **Production mapping** | ECS/Fargate, RDS, ElastiCache, SQS/MSK, ECR, CloudWatch |
+
+## Architecture
 
 ```mermaid
 flowchart LR
-    Client --> FastAPI
-    FastAPI -->|atomic enqueue| Redis[(Redis Streams)]
-    Redis --> Worker[Async Workers]
-    Worker --> Postgres[(PostgreSQL)]
-    Worker -->|max retries exceeded| DLQ[(Dead Letter Stream)]
+    C[Client / SDK] --> A[FastAPI Ingestion API]
+    A -->|atomic idempotency + enqueue| R[(Redis Streams)]
+    R --> W[Async Workers]
+    W -->|transactional write| P[(PostgreSQL)]
+    W -->|retry exceeded| D[(Dead Letter Stream)]
+    W -->|reclaim stale pending| R
+    A --> M[Prometheus Metrics]
 ```
 
-## Features
+### Processing flow
 
-- FastAPI event ingestion API
-- single-event and batch ingestion (`1..1000` events/request)
-- Redis Streams consumer groups
-- atomic Redis Lua-based enqueue + idempotency key
-- PostgreSQL primary-key deduplication as the final consistency boundary
-- asynchronous worker processing
-- stale pending-message recovery with Redis `XAUTOCLAIM`
-- retry and dead-letter queue handling
-- Redis-backed fixed-window rate limiting
-- user-level aggregate profiles
-- basic analytics endpoint
-- Prometheus-compatible metrics
-- liveness and dependency-aware readiness checks
-- Docker Compose local environment
-- load/benchmark scripts
-- AWS reference architecture
-- GitHub Actions CI
+```text
+Client
+  │
+  ▼
+FastAPI validation
+  │
+  ▼
+Atomic Redis Lua script
+(idempotency key + XADD)
+  │
+  ▼
+Redis Stream
+  │
+  ▼
+Consumer Group Worker
+  │
+  ├── success ──► PostgreSQL ──► ACK
+  │
+  └── failure ──► Retry ──► Retry ──► DLQ
+```
+
+## Engineering highlights
+
+### 1. Atomic ingestion idempotency
+
+A Redis Lua script performs the idempotency check and stream append as one atomic operation. This avoids the failure mode where an idempotency key is written but the corresponding queue message is never created.
+
+### 2. Two-layer duplicate protection
+
+Redis prevents duplicate work during the ingestion window, while PostgreSQL enforces durable deduplication with `event_id` as the primary key and `ON CONFLICT DO NOTHING`.
+
+**Queue semantics:** at-least-once  
+**Database effect:** effectively once per event id
+
+### 3. Worker crash recovery
+
+Workers acknowledge messages only after successful database processing. If a worker dies before ACK, the message remains pending and another worker can reclaim it with Redis `XAUTOCLAIM`.
+
+### 4. Failure isolation
+
+Transient failures are retried with an incremented retry count. Messages that exceed the retry limit move to a DLQ. Invalid payloads go directly to the DLQ because retrying cannot make malformed data valid.
+
+### 5. Independent scaling
+
+API capacity and processing capacity are decoupled. In production, API containers can scale on request latency while workers scale on queue depth or oldest-message age.
 
 ## Tech stack
 
-**Python 3.12 · FastAPI · SQLAlchemy 2 · asyncpg · PostgreSQL 16 · Redis 7 · Pydantic 2 · Docker · Prometheus**
+| Layer | Technology |
+|---|---|
+| API | Python 3.12, FastAPI, Pydantic 2 |
+| Persistence | PostgreSQL 16, SQLAlchemy 2, asyncpg |
+| Queue / cache | Redis 7, Redis Streams |
+| Processing | Async Python workers, consumer groups |
+| Observability | Prometheus metrics, health probes |
+| Runtime | Docker, Docker Compose |
+| Quality | pytest, Ruff, GitHub Actions |
+| Cloud design | AWS ECS/Fargate, RDS, ElastiCache, SQS/MSK, ECR, CloudWatch |
+
+## What this project demonstrates
+
+- designing for burst traffic instead of assuming steady request volume;
+- reasoning about **at-least-once delivery** and idempotent consumers;
+- choosing the durable consistency boundary between Redis and PostgreSQL;
+- recovering work after process failure rather than silently losing it;
+- separating API latency from downstream database latency;
+- measuring throughput and tail latency instead of claiming unverified performance;
+- mapping a local architecture to managed production infrastructure.
+
+> **Benchmark note:** the repository includes reproducible 10K/100K event benchmark tooling and reports throughput, mean latency, p50, p95, p99, and failures. No fabricated performance numbers are committed.
+
+---
 
 ## Quick start
 
