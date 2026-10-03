@@ -1,6 +1,7 @@
 """Real Redis/PostgreSQL boundaries, including actual worker process deaths."""
 
 import asyncio
+import json
 import os
 import signal
 from datetime import UTC, datetime, timedelta
@@ -9,6 +10,7 @@ from decimal import Decimal
 import httpx
 import pytest
 from fastapi import FastAPI
+from redis.exceptions import ResponseError
 from sqlalchemy import func, select, text
 
 from app.api.routes.events import ingestion_service, router
@@ -105,6 +107,16 @@ async def test_killed_worker_pending_entry_is_reclaimed_without_double_counting(
     event = stack.event()
     await enqueue_raw(stack, event)
     victim = await stack.start_worker(checkpoint)
+    if checkpoint == "before_commit":
+        # The marker is observed inside the worker's transaction, proving that
+        # real event and aggregate SQL writes happened before the kill.
+        expected = {
+            "event_id": event.event_id,
+            "event_rows": 1,
+            "profile_events": 1,
+            "in_transaction": True,
+        }
+        assert (stack.directory / "worker-0.ready").read_text() == json.dumps(expected)
     assert await stack.pending() == 1
     assert await event_count(stack) == committed
     await stack.stop_worker(victim, kill=True)
@@ -223,3 +235,36 @@ async def test_worker_continues_reclaim_cursor_past_fresh_pending_prefix(stack):
         reached_stale_tail, "reclaim scan to advance past ten fresh pending entries", timeout=5
     )
     assert await stack.pending() == 10
+
+
+async def test_failed_enqueue_removes_new_marker_and_same_event_can_be_retried(stack):
+    event = stack.event()
+    key = f"idempotency:{event.event_id}"
+    service = EventIngestionService(stack.redis)
+    # Only this fixture's unique stream/group is replaced.
+    await stack.redis.delete(stack.stream)
+    await stack.redis.set(stack.stream, "wrong-type")
+    with pytest.raises(ResponseError, match="WRONGTYPE"):
+        await service.enqueue(event)
+    assert await stack.redis.exists(key) == 0
+
+    await stack.redis.delete(stack.stream)
+    await stack.redis.xgroup_create(stack.stream, stack.group, id="0", mkstream=True)
+    assert await service.enqueue(event) is True
+    assert await service.enqueue(event) is False
+    assert await stack.redis.xlen(stack.stream) == 1
+    message_id, fields = (await stack.read())[0]
+    await handle_message(stack.redis, message_id, fields)
+    assert await event_count(stack) == 1
+    assert await stack.pending() == 0
+
+
+async def test_enqueue_preserves_preexisting_marker_when_destination_is_broken(stack):
+    event = stack.event()
+    key = f"idempotency:{event.event_id}"
+    await stack.redis.set(key, "already-queued", ex=60)
+    await stack.redis.delete(stack.stream)
+    await stack.redis.set(stack.stream, "wrong-type")
+    assert await EventIngestionService(stack.redis).enqueue(event) is False
+    assert await stack.redis.get(key) == "already-queued"
+    assert await stack.redis.ttl(key) > 0

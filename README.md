@@ -200,7 +200,7 @@ API capacity and processing capacity are decoupled. In production, API container
 - measuring throughput and tail latency instead of claiming unverified performance;
 - mapping a local architecture to managed production infrastructure.
 
-> **Benchmark note:** the repository includes reproducible 10K/100K event benchmark tooling and reports throughput, mean latency, p50, p95, p99, and failures. No fabricated performance numbers are committed.
+> **Benchmark note:** the benchmark separates requested events, HTTP-accepted events, and unique rows actually committed in PostgreSQL. It reports ingestion throughput, durable-completion throughput, request p95/p99, and explicitly labeled DB-observed latency bounds. See [measured results and reproduction](docs/benchmarks.md).
 
 ---
 
@@ -325,12 +325,15 @@ python scripts/generate_events.py --count 10000 --batch-size 100
 Run a concurrent benchmark:
 
 ```bash
-python scripts/benchmark.py --events 10000 --concurrency 100 --batch-size 100
+python scripts/benchmark.py --events 10000 --concurrency 20 --batch-size 100 \
+  --worker-count 1 --output artifacts/10000-worker1.json
 ```
 
-The script reports throughput, mean latency, p50, p95, p99, and request failures. See [`docs/benchmarks.md`](docs/benchmarks.md).
-
-> No fabricated benchmark results are committed. Run the tests on the target environment and record the actual numbers.
+The script needs read access to PostgreSQL through `DATABASE_URL`. It waits for all
+run-scoped IDs to become visible, emits raw JSON, and exits nonzero for failed
+requests, duplicate responses, incomplete processing, or timeout. HTTP 202 alone
+is never counted as durable completion. See [`docs/benchmarks.md`](docs/benchmarks.md)
+for the isolated Compose run, actual results, environment, and measurement limits.
 
 ## Reliability decisions
 
@@ -390,7 +393,22 @@ pytest -q
 ruff check .
 ```
 
-The unit tests cover schema validation, ingestion idempotency behavior, and retry/DLQ routing.
+The unit tests cover schemas, benchmark accounting/failures, and retry/reclaim logic.
+Sixteen opt-in integration tests use real Redis and PostgreSQL, including actual
+SIGKILL before transaction commit and after commit/before ACK, duplicate deliveries,
+aggregate correctness, retry exhaustion, and DLQ behavior:
+
+```bash
+mkdir -p artifacts
+docker compose -p event-validation -f compose.validation.yml up -d --build --wait api
+docker compose -p event-validation -f compose.validation.yml run --build --rm test
+docker compose -p event-validation -f compose.validation.yml down -v --remove-orphans
+```
+
+The validation Compose project uses disposable containers, isolated test schemas
+and Redis keys, and no host ports or production credentials. `pytest -q` skips
+integration tests unless `RUN_INTEGRATION=1` is explicitly set. The `real-stack`
+GitHub Actions workflow runs them before any performance comparison.
 
 ## Repository structure
 

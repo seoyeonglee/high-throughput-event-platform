@@ -20,6 +20,8 @@ jobs:
       COMPOSE_PROJECT_NAME: event-validation
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Record environment and start isolated stack
         run: |
           mkdir -p artifacts
@@ -29,6 +31,7 @@ jobs:
             uname -a
             lscpu
             free -h
+            cat /sys/fs/cgroup/cpu.max /sys/fs/cgroup/memory.max 2>/dev/null || true
             docker version
             docker compose version
           } > artifacts/environment.txt
@@ -73,7 +76,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: real-stack-${{ github.sha }}
+          name: real-stack-${{ github.event.pull_request.head.sha || github.sha }}
           path: artifacts/
           retention-days: 30
       - name: Stop disposable stack
