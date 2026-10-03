@@ -4,6 +4,58 @@ This benchmark measures the full **FastAPI → Redis Streams → worker → Post
 reference stack. The public Render demo uses an ephemeral in-memory queue and is
 **not** the system being measured here.
 
+## Recorded results — 2026-10-03 UTC
+
+Source: [`9f22610`](https://github.com/seoyeonglee/high-throughput-event-platform/commit/9f226100d1125ecd77e811066f1b334de80076aa), clean checkout.
+All three runs used actual **PostgreSQL 17.11 + Redis 8.0.2**, installed from official
+Debian packages in a cloud Linux workspace, with one API process and fresh service
+data per scenario. They were **not Docker runs**: Docker is absent in that workspace.
+The separate CI validation uses PostgreSQL 16 + Redis 7 through Compose.
+
+Python 3.12.14; Linux x86-64; 9 logical CPUs exposed; approximately 9.7 GiB memory
+reported. Detailed CPU topology and CPU quota are unavailable in the sandbox.
+[Exact environment/dependencies](benchmark-results/2026-10-03/environment.txt).
+All scenarios: concurrency 20, batch 100, 10,000 users, 250 ms observer interval,
+600 s drain deadline, Redis AOF enabled; no separate warm-up.
+
+| Events / workers | Requested / accepted / DB completed | Accepted events/s | Completed events/s | HTTP p95 / p99 (ms) | DB-observed p95 / p99 (s, upper bounds) | Timed load (s) |
+|---|---:|---:|---:|---:|---:|---:|
+| [10,000 / 1 worker](benchmark-results/2026-10-03/10000-worker1.json) | 10,000 / 10,000 / 10,000 | 7,758.9 | 533.8 | 538.2 / 1268.2 | 16.75 / 18.46 | 18.73 |
+| [100,000 / 1 worker](benchmark-results/2026-10-03/100000-worker1.json) | 100,000 / 100,000 / 100,000 | 11,375.3 | 552.1 | 229.2 / 447.7 | 163.75 / 170.42 | 181.12 |
+| [100,000 / 2 workers](benchmark-results/2026-10-03/100000-worker2.json) | 100,000 / 100,000 / 100,000 | 12,361.9 | 1,062.9 | 219.0 / 433.6 | 81.69 / 85.16 | 94.08 |
+
+Every run had zero HTTP/network/accounting failures, zero duplicates, zero DLQ
+entries, zero pending messages, and zero consumer-group lag at the final check
+([queue snapshots](benchmark-results/2026-10-03/)). The two-worker 100K run measured
+**1.93×** the one-worker completed throughput in this environment. This is one
+comparison, not a general linear-scaling claim. The much higher acceptance rate
+also demonstrates why HTTP throughput must not be advertised as completed throughput.
+
+### A failed run is retained, too
+
+On the GitHub Actions 4-vCPU / 15 GiB runner, PostgreSQL 16.15 + Redis 7 processing
+was slower: the initial 100K run accepted 100,000 but observed only **76,537** committed
+rows before its **600 s drain deadline**. It correctly exited 1 with `drain_timeout`,
+with no request failures or DLQ entries. The worker was healthy and still draining
+(100 pending; 23,264 not yet delivered at the later queue snapshot). This is not
+reported as a successful 100K result or evidence of lost events.
+
+- [Original failure JSON](benchmark-results/2026-10-03/ci-600s-timeout.json)
+- [Runner and service environment](benchmark-results/2026-10-03/ci-timeout-environment.txt)
+- [Final queue snapshot](benchmark-results/2026-10-03/ci-timeout-queue.txt)
+- [Original CI run](https://github.com/seoyeonglee/high-throughput-event-platform/actions/runs/37079706180)
+
+The CI drain bound is now 1200 s to allow measurement on the slower runner; error
+checks and exact completion requirements remain unchanged. The latest exact-head
+verification is available from [PR #1 checks](https://github.com/seoyeonglee/high-throughput-event-platform/pull/1/checks).
+
+### Correctness checks
+
+The same application code passed **74 tests**, including **16 real-service
+integration cases** ([JUnit evidence](benchmark-results/2026-10-03/local-tests.xml)).
+Ruff and the TypeScript/Vite production build passed. The default test command
+reports 58 passed and 16 skipped unless the real-service tests are explicitly enabled.
+
 ## What each number means
 
 - **Requested:** unique event IDs the client planned to send.
@@ -46,14 +98,14 @@ docker compose down -v --remove-orphans
 docker compose up -d --wait api worker
 docker compose run --build --rm benchmark \
   --events 10000 --concurrency 20 --batch-size 100 --users 10000 \
-  --worker-count 1 --drain-timeout 600 --poll-interval 0.25 \
+  --worker-count 1 --drain-timeout 1200 --poll-interval 0.25 \
   --environment-label local-compose --output /evidence/10000-worker1.json
 
 docker compose down -v --remove-orphans
 docker compose up -d --wait api worker
 docker compose run --rm benchmark \
   --events 100000 --concurrency 20 --batch-size 100 --users 10000 \
-  --worker-count 1 --drain-timeout 600 --poll-interval 0.25 \
+  --worker-count 1 --drain-timeout 1200 --poll-interval 0.25 \
   --environment-label local-compose --output /evidence/100000-worker1.json
 
 # Only compare scaling after the correctness suite and one-worker runs pass.
@@ -61,7 +113,7 @@ docker compose down -v --remove-orphans
 docker compose up -d --scale worker=2 --wait api worker
 docker compose run --rm benchmark \
   --events 100000 --concurrency 20 --batch-size 100 --users 10000 \
-  --worker-count 2 --drain-timeout 600 --poll-interval 0.25 \
+  --worker-count 2 --drain-timeout 1200 --poll-interval 0.25 \
   --environment-label local-compose --output /evidence/100000-worker2.json
 
 docker compose exec -T redis redis-cli XINFO GROUPS events
@@ -83,7 +135,7 @@ If the API/worker are already running outside Docker:
 # Supply a read-only-capable connection to the same PostgreSQL database.
 export DATABASE_URL='postgresql+asyncpg://postgres:postgres@localhost:5432/events'
 python scripts/benchmark.py --events 10000 --concurrency 20 --batch-size 100 \
-  --worker-count 1 --drain-timeout 600 --output artifacts/10000-worker1.json
+  --worker-count 1 --drain-timeout 1200 --output artifacts/10000-worker1.json
 ```
 
 `--worker-count` is caller-provided metadata, not service discovery. DB URL and API

@@ -1,0 +1,13 @@
+name
+event-workers
+consumers
+1
+pending
+0
+last-delivered-id
+1790985759676-5
+entries-read
+10000
+lag
+0
+0

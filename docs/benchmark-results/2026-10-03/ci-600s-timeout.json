@@ -1,0 +1,101 @@
+{
+  "completion": {
+    "all_requested_completed": false,
+    "observer_errors": [],
+    "polls": 2105,
+    "reason": "drain_timeout",
+    "target_unique_events": 100000,
+    "timed_out": true
+  },
+  "config": {
+    "batch_size": 100,
+    "concurrency": 20,
+    "drain_timeout_seconds": 600.0,
+    "environment_label": "github-actions-compose",
+    "events": 100000,
+    "poll_interval_seconds": 0.25,
+    "request_timeout_seconds": 60,
+    "url": "http://api:8000",
+    "users": 10000,
+    "worker_count": 1
+  },
+  "db_observed_end_to_end_latency_ms": {
+    "count": 76537,
+    "description": "Client request start to first committed-row observation. Includes HTTP, queue, processing, polling delay and query time; not exact commit latency. Poll scheduling and query duration can add more than one configured poll interval.",
+    "max": 603784.2603849999,
+    "mean": 302098.90002599376,
+    "measurement": "polling_upper_bound",
+    "p50": 300853.642487,
+    "p95": 573421.903542,
+    "p99": 598007.812714,
+    "poll_interval_seconds": 0.25
+  },
+  "environment": {
+    "client_dependencies": {
+      "SQLAlchemy": "2.0.50",
+      "asyncpg": "0.30.0",
+      "fastapi": "0.128.2",
+      "httpx": "0.28.1",
+      "redis": "5.2.1"
+    },
+    "git_dirty": null,
+    "git_revision": null,
+    "logical_cpus": 4,
+    "machine": "x86_64",
+    "platform": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.41",
+    "postgresql_version": "16.15",
+    "python": "3.12.15",
+    "server_configuration": "not inspected; supply deployment configuration with the report"
+  },
+  "events": {
+    "accepted": 100000,
+    "attempted": 100000,
+    "db_completed": 76537,
+    "duplicates": 0,
+    "http_error": 0,
+    "malformed_response": 0,
+    "network_failure": 0,
+    "rejected": 0,
+    "requested": 100000
+  },
+  "exit_code": 1,
+  "failure_reasons": [
+    "drain_timeout"
+  ],
+  "finished_at": "2026-10-03T00:06:51.620427+00:00",
+  "request_latency_ms": {
+    "count": 1000,
+    "max": 1165.3008039999975,
+    "mean": 334.26236056999994,
+    "p50": 319.0518250000025,
+    "p95": 463.28789100002155,
+    "p99": 1132.5074979999954
+  },
+  "requests": {
+    "accepted": 1000,
+    "attempted": 1000,
+    "http_error": 0,
+    "http_status_counts": {
+      "202": 1000
+    },
+    "malformed_response": 0,
+    "network_failure": 0,
+    "planned": 1000
+  },
+  "run_id": "871bffaa9133484db61b7613e362680d",
+  "schema_version": 1,
+  "started_at": "2026-10-02T23:56:34.730395+00:00",
+  "success": false,
+  "throughput": {
+    "completed_events_per_second": 124.08218735221436,
+    "completed_rate_window": "load_start_to_end_of_ingestion_and_database_drain",
+    "ingestion_events_per_second": 5943.878385424182
+  },
+  "timing": {
+    "description": "Timed load excludes metadata collection and preflight, includes dispatch and task cleanup, and awaits both sender completion and database observation. started_at and finished_at describe the broader report lifecycle.",
+    "drain_seconds": 600.001006602,
+    "ingestion_seconds": 16.82403197299999,
+    "preflight_seconds": 0.058890440999988414,
+    "total_seconds": 616.825038575
+  }
+}

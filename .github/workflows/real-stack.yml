@@ -11,7 +11,7 @@ permissions:
 jobs:
   recovery-and-benchmark:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 45
     defaults:
       run:
         shell: bash
@@ -51,7 +51,7 @@ jobs:
             docker compose up -d --wait api worker
             docker compose run --build --rm benchmark \
               --events "$EVENTS" --concurrency 20 --batch-size 100 --users 10000 \
-              --worker-count 1 --drain-timeout 600 --poll-interval 0.25 \
+              --worker-count 1 --drain-timeout 1200 --poll-interval 0.25 \
               --environment-label github-actions-compose \
               --output "/evidence/${EVENTS}-worker1.json" \
               > "artifacts/${EVENTS}-worker1.stdout"
@@ -62,7 +62,7 @@ jobs:
           docker compose up -d --scale worker=2 --wait api worker
           docker compose run --rm benchmark \
             --events 100000 --concurrency 20 --batch-size 100 --users 10000 \
-            --worker-count 2 --drain-timeout 600 --poll-interval 0.25 \
+            --worker-count 2 --drain-timeout 1200 --poll-interval 0.25 \
             --environment-label github-actions-compose \
             --output /evidence/100000-worker2.json \
             > artifacts/100000-worker2.stdout
