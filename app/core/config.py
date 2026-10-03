@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -25,6 +26,7 @@ class Settings(BaseSettings):
     worker_block_ms: int = 5_000
     worker_max_retries: int = 3
     worker_claim_idle_ms: int = 60_000
+    worker_claim_interval_ms: int = Field(default=30_000, gt=0)
 
 
 @lru_cache

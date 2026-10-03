@@ -1,0 +1,84 @@
+name: real-stack
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  recovery-and-benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    env:
+      COMPOSE_FILE: compose.validation.yml
+      COMPOSE_PROJECT_NAME: event-validation
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Record environment and start isolated stack
+        run: |
+          mkdir -p artifacts
+          {
+            date -u --iso-8601=seconds
+            git rev-parse HEAD
+            uname -a
+            lscpu
+            free -h
+            cat /sys/fs/cgroup/cpu.max /sys/fs/cgroup/memory.max 2>/dev/null || true
+            docker version
+            docker compose version
+          } > artifacts/environment.txt
+          docker compose config > artifacts/compose.resolved.yml
+          docker compose up -d --build --wait api worker
+          docker compose exec -T postgres psql -U postgres -d events -c 'select version();' >> artifacts/environment.txt
+          docker compose exec -T redis redis-cli INFO server >> artifacts/environment.txt
+          docker compose images >> artifacts/environment.txt
+      - name: Prove real-service reliability including killed workers
+        run: docker compose run --build --rm test | tee artifacts/integration.txt
+      - name: Measure 10K baseline then bounded 100K with one worker
+        run: |
+          for EVENTS in 10000 100000; do
+            # Give each scenario the same empty DB/queue instead of silently
+            # comparing a cold one-worker run with a warm two-worker run.
+            docker compose down -v --remove-orphans
+            docker compose up -d --wait api worker
+            docker compose run --build --rm benchmark \
+              --events "$EVENTS" --concurrency 20 --batch-size 100 --users 10000 \
+              --worker-count 1 --drain-timeout 1200 --poll-interval 0.25 \
+              --environment-label github-actions-compose \
+              --output "/evidence/${EVENTS}-worker1.json" \
+              > "artifacts/${EVENTS}-worker1.stdout"
+          done
+      - name: Compare 100K with two workers after correctness passes
+        run: |
+          docker compose down -v --remove-orphans
+          docker compose up -d --scale worker=2 --wait api worker
+          docker compose run --rm benchmark \
+            --events 100000 --concurrency 20 --batch-size 100 --users 10000 \
+            --worker-count 2 --drain-timeout 1200 --poll-interval 0.25 \
+            --environment-label github-actions-compose \
+            --output /evidence/100000-worker2.json \
+            > artifacts/100000-worker2.stdout
+      - name: Collect final queue state and service logs
+        if: always()
+        run: |
+          docker compose ps -a > artifacts/compose-ps.txt
+          docker compose logs --no-color > artifacts/services.log
+          docker compose exec -T redis redis-cli XINFO GROUPS events > artifacts/queue-state.txt || true
+          docker compose exec -T redis redis-cli XLEN events-dlq >> artifacts/queue-state.txt || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: real-stack-${{ github.event.pull_request.head.sha || github.sha }}
+          path: artifacts/
+          retention-days: 30
+      - name: Stop disposable stack
+        if: always()
+        run: docker compose down -v --remove-orphans

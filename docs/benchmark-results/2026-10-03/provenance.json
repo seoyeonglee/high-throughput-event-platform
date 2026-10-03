@@ -1,0 +1,40 @@
+{
+  "failed_ci_run": {
+    "artifact_id": 11258361286,
+    "head_sha": "fb7a837f50b9000f31cc10d6c29d7c518da52a44",
+    "original_zip_sha256": "d69bb3f1e94b8dc50193464ff2c618ff46c29e2536faf66a96b92b51afb04fcd",
+    "tested_merge_sha": "eefb9b8133c76031c809bf1cf170b1bd39b4b502",
+    "url": "https://github.com/seoyeonglee/high-throughput-event-platform/actions/runs/37079706180"
+  },
+  "local_command": "python scripts/benchmark.py --url http://127.0.0.1:8000 --events <10000|100000> --concurrency 20 --batch-size 100 --users 10000 --worker-count <1|2> --drain-timeout 600 --poll-interval 0.25 --environment-label cloud-user-space-postgres17-redis8 --output <scenario>.json",
+  "local_fresh_state_each_scenario": true,
+  "local_measurement": "actual PostgreSQL 17.11 and Redis 8.0.2 processes; Docker not used",
+  "local_service_configuration": {
+    "RATE_LIMIT_REQUESTS": 1000000,
+    "WORKER_BATCH_SIZE": 100,
+    "WORKER_BLOCK_MS": 200,
+    "WORKER_CLAIM_IDLE_MS": 60000,
+    "WORKER_CLAIM_INTERVAL_MS": 1000,
+    "api": "uvicorn app.main:app --no-access-log; one process; no reload",
+    "postgres": "default initdb --no-locale -E UTF8; TCP loopback only; fresh data each run",
+    "redis": "--appendonly yes; fresh data each run",
+    "worker_database_pool": {
+      "max_overflow": 20,
+      "pool_size": 10
+    }
+  },
+  "sha256": {
+    "10000-worker1-queue.txt": "6c5785fe0dcb951021a4d0dc03e4b04ec14fda7810fa5e0a95b0eea135511f36",
+    "10000-worker1.json": "c010815c61dd450e19e3d3213b9d71e6e87efbb8a4d9410b1d8dba1181718951",
+    "100000-worker1-queue.txt": "6eb53bb529dc76876e94c70c4002288578b4f241dd85ba61e44e86e170fd485d",
+    "100000-worker1.json": "4078b2a8a9f188aadb1ad78f522fd95a5c59fa13868c6e947307f32d6f1a84cf",
+    "100000-worker2-queue.txt": "1fa796fad56ce002d8a1768839bd820b7a0fa10343bfe52e5a72b8346dff9f6b",
+    "100000-worker2.json": "b128b50e00a62d3e50df8abca489b04aa53b07b19d31f168fa179ac4f2736e96",
+    "ci-600s-timeout.json": "152151b7fd5320a9f325abb30e161de7c1063cd1c5a58bb30dc31dede18fe6e6",
+    "ci-timeout-environment.txt": "1e441a6bd6a3f326b7dbb44a872fd63aee46f72bc0d711ce536f79e1e628f122",
+    "ci-timeout-queue.txt": "b3b6a18f3d6a797675b237947f35f857a6a53b6cef769101ef1c0b3f92e0d2f5",
+    "environment.txt": "ca56c2d1871cd77f6bd2f9cd3b43004e6f1b996929236f9dfabd33dfcacf9666",
+    "local-tests.xml": "9a53ff2778eab335c73382ed64dca0996bd390ef91615faf0bf64a56dfcb4c4d"
+  },
+  "source_commit": "9f226100d1125ecd77e811066f1b334de80076aa"
+}

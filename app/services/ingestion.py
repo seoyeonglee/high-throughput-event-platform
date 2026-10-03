@@ -11,7 +11,13 @@ if redis.call('EXISTS', KEYS[1]) == 1 then
   return 0
 end
 redis.call('SET', KEYS[1], 'queued', 'EX', ARGV[1])
-redis.call('XADD', KEYS[2], '*', 'payload', ARGV[2], 'retry_count', '0')
+-- Lua errors do not roll back prior writes. Release only the marker this
+-- invocation created when the append fails, so a caller can safely retry.
+local appended = redis.pcall('XADD', KEYS[2], '*', 'payload', ARGV[2], 'retry_count', '0')
+if type(appended) == 'table' and appended.err then
+  redis.call('DEL', KEYS[1])
+  return redis.error_reply(appended.err)
+end
 return 1
 """
 
